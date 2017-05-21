@@ -25,7 +25,7 @@ from binascii import b2a_hex, a2b_hex
 
 import socket
 import threading
-import SocketServer
+import socketserver
 import os
 import stat
 import time 
@@ -104,7 +104,7 @@ def mi_getseq(enc):
     if pos >= 0:
         seq = enc[:pos]
         return seq
-    print "bad seq:", enc
+    print("bad seq:", enc)
     return 0
 
 def gen_AES_param(seq, key):
@@ -126,21 +126,21 @@ def mi_decrypt(enc, key):
     if pos >= 0:
         seq = enc[:pos]
     if seq == None:
-        print "bad seq:", enc
+        print("bad seq:", enc)
         return None
     
     try:
         body = a2b_hex(enc[pos + 1:])
     except:
-        print "bad enc:", enc
+        print("bad enc:", enc)
         return None
     
     k, iv = gen_AES_param(seq, key)
     obj = AES.new(k, AES.MODE_CBC, iv)
     try:
         plain = obj.decrypt(body)
-    except Exception, err:
-        print str(err)
+    except Exception as err:
+        print(str(err))
         return None
     
     return plain.rstrip('\n')
@@ -162,7 +162,7 @@ def mi_encrypt(seq, plain, key):
     :returns: the encrypted password
     """
     if plain == None:
-        print "null password"
+        print("null password")
         return "0,"
     k, iv = gen_AES_param(seq, key)
     obj = AES.new(k, AES.MODE_CBC, iv)
@@ -243,14 +243,14 @@ class pass_db:
                     else:
                         self.password_enc[key] = val
                 except:
-                    print "error config line #%d : %s" % (line_cnt, line)
+                    print("error config line #%d : %s" % (line_cnt, line))
                     continue
             
             self.init_ok = self.master_hash != None
             # print "init:", self.init_ok
             f.close() 
         except:
-            print "bad configuration file:", self.fn
+            print("bad configuration file:", self.fn)
             return
         
     def get_master_hash(self, master, old=None):
@@ -275,10 +275,10 @@ class pass_db:
         m.update(seq)
         m.update(master)
         
-        for i in xrange(1023):
+        for i in range(1023):
             m.update(m.digest())
         master1 = m.digest()
-        for i in xrange(8):
+        for i in range(8):
             m.update(m.digest())
         return master1, seq + "," + m.hexdigest()[:4]
         
@@ -341,7 +341,7 @@ class pass_db:
         with self.master_lock:
             for i in self.password_enc:
                 new_pass[i] = mi_encrypt(rand(), mi_decrypt(self.password_enc[i], self.master1), master1)
-                print new_pass[i]
+                print(new_pass[i])
             
             self.master1 = master1
             self.master_hash = master_hash
@@ -374,7 +374,7 @@ class pass_db:
         '''
         
         if(self.master_hash == None):
-            print "Error: can't write cfg without a master password"
+            print("Error: can't write cfg without a master password")
             return False
         
         new_fn = self.fn + ".new"
@@ -401,9 +401,9 @@ class pass_db:
                 f.flush()
                 os.fsync(f.fileno())
                 f.close()
-            except Exception, e:
-                print str(e)
-                print "Error: can't write to %s." % new_fn
+            except Exception as e:
+                print(str(e))
+                print("Error: can't write to %s." % new_fn)
                 critical_error = True
                 return False
         
@@ -418,7 +418,7 @@ class pass_db:
         try:
             os.rename(new_fn, self.fn)
         except:
-            print "Error: can't replace %s" % self.fn
+            print("Error: can't replace %s" % self.fn)
             critical_error = True
             return False
         return True
@@ -441,7 +441,7 @@ class pass_db:
         
 db = None
 
-class master_handler(SocketServer.BaseRequestHandler):
+class master_handler(socketserver.BaseRequestHandler):
     """The unix socket service for pass_db.
     """
     
@@ -478,7 +478,7 @@ class master_handler(SocketServer.BaseRequestHandler):
 
     def _send(self, msg):
         if verbose:
-            print "-> %s" % msg
+            print("-> %s" % msg)
         self.request.sendall(msg)
         
     def handle(self):
@@ -527,7 +527,7 @@ class master_handler(SocketServer.BaseRequestHandler):
             line = self._recv_line()
             header, body = get_header(line)
             if verbose:
-                print '<- %s %s' % (header, body)
+                print('<- %s %s' % (header, body))
             if header == 'state':
                 self._send('state: %s\n' % self.state())
                 continue
@@ -607,9 +607,9 @@ class master_handler(SocketServer.BaseRequestHandler):
                 break
             elif header == '':
                 continue
-            print "unknown_header:'%s'" % header
+            print("unknown_header:'%s'" % header)
             
-class master_server(SocketServer.ThreadingMixIn, SocketServer.UnixStreamServer):
+class master_server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     pass
 
 def start_service(unixsock):
@@ -658,7 +658,7 @@ def start_service_daemon(unixsock):
             with daemon.DaemonContext():
                 start_service(unixsock)
     except:
-        print "Error: can't start the master service."
+        print("Error: can't start the master service.")
 
 def url_hash(url):
     """generate the id used in the password keeping service.
@@ -732,12 +732,12 @@ class client:
                 self.master_status = -1
                 
             # print "resp:", response
-        except Exception, err:
+        except Exception as err:
             if verbose and try_hard:
-                print "Error:", str(err)
+                print("Error:", str(err))
             self.sock.close()
             if verbose and try_hard:
-                print "Error: can't connect to the password keeping service."
+                print("Error: can't connect to the password keeping service.")
             self.connected = False
             pass
 
@@ -754,7 +754,7 @@ class client:
                 pass
             self.connect()
             if not self.connected:
-                print "Error: can't connect to the master password service."
+                print("Error: can't connect to the master password service.")
                 sys.exit(2)
 
     def need_master(self):
@@ -796,7 +796,7 @@ class client:
         self.sock.sendall("check_master %s\n" % master)
         resp = self._recv_line()
         if verbose:
-            print resp
+            print(resp)
         if not is_resp_err(resp):
             self.master_status = 1
         return not is_resp_err(resp), get_resp_val(resp)
@@ -845,7 +845,7 @@ class client:
         self.sock.sendall("get_pass %s\n" % url_hash(url))
         resp = self._recv_line()
         if verbose:
-            print resp
+            print(resp)
         return not is_resp_err(resp), get_resp_val(resp)
     
     def get_timeout(self):
@@ -861,7 +861,7 @@ class client:
         self.sock.sendall("get_timeout\n")
         resp = self._recv_line()
         if verbose:
-            print resp
+            print(resp)
         return not is_resp_err(resp), get_resp_val(resp)
         
     def set_timeout(self, to):

@@ -11,14 +11,14 @@ import sys
 import mipass
         
 def usage():
-    print """Test usage:
+    print("""Test usage:
 mipass [opt] [id]
    -d      front daemon mode
    -s pass set pass
    -m pass set master pass
    -k      kill the master daemon process
    -v      verbose mode
-"""
+""")
 
 def test():
     global verbose
@@ -27,7 +27,7 @@ def test():
     try:
         opts, args = getopt.getopt(sys.argv[1:], "dhs:m:kv")
     except getopt.GetoptError as err:
-        print str(err)  # will print something like "option -a not recognized"
+        print(str(err))  # will print something like "option -a not recognized"
         usage()
         sys.exit(2)
 
@@ -58,7 +58,7 @@ def test():
         elif o == '-v':
             mipass.verbose=True # why do I need to assign twice ?!
         else:
-            print "unhandled option:", o,a
+            print("unhandled option:", o,a)
             usage()
             sys.exit(2)
     
@@ -73,7 +73,7 @@ def test():
         except:
             pass
 
-        print "The password keeping service starts..."
+        print("The password keeping service starts...")
         mipass.start_service(mipass.unixsock)
         return
     
@@ -90,10 +90,10 @@ def test():
             master_pwd2 = getpass.getpass("please repeat it:")
             if master_pwd == master_pwd2:
                 break
-            print "They are not matched!"
+            print("They are not matched!")
         ok, resp = c.set_master(master_pwd)
         if not ok:
-            print "Can't set the master key. Error:",resp
+            print("Can't set the master key. Error:",resp)
             sys.exit(1)
             
     elif c.need_master()== -1:
@@ -101,23 +101,23 @@ def test():
         while 1:
             master_pwd = getpass.getpass("input the master password:")
             ok, resp = c.check_master(master_pwd)
-            print ok, resp
+            print(ok, resp)
             if not ok:
-                print "Please try again. Error:",resp
+                print("Please try again. Error:",resp)
             else:
                 break
         
     # set/put master pass
     if master != None:
         ok, resp = c.set_master(master)
-        print ok, resp
+        print(ok, resp)
     
     if id != None:
         if setting:
             ok, resp = c.set_pass(id, password)
         else:
             ok, resp = c.get_pass(id)
-        print ok, resp
+        print(ok, resp)
         
     c.close()
 

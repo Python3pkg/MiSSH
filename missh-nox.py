@@ -1,1 +1,401 @@
-missh
+#!/usr/bin/env python
+import npyscreen
+import sys
+import os
+import mipexpect
+import getopt
+import mipass
+import platform
+import time
+
+default_opt = \
+"""% set dynamic socks proxy
+% -D 1080
+
+% forward a local port to a service at a remote port, e.g. vnc @ host:1
+% -L 5901
+% -L 5901:1.2.3.4:5901
+
+% forward a remote port to a service at a local port
+% -R 8080
+
+% sftp options
+%# -r
+"""
+    
+c = None
+
+class MisshApp(npyscreen.NPSApp):
+    def __init__(self, fn, host, password, opt):
+        self.fn = fn
+        self.hostn = host
+        self.passwordn = password
+        self.optn = opt
+#        self.fwdn = fwd
+    
+    def main(self):
+        npyscreen.setTheme(npyscreen.Themes.TransparentThemeDarkText)
+
+        F = npyscreen.ActionForm(name="MiSSH - " + self.fn)
+        F.on_ok = self.on_ok
+        F.while_editing = self.on_switch
+        
+        self.host = F.add(npyscreen.TitleText, name="Host:", value=self.hostn)
+#        self.port = F.add(npyscreen.TitleText, name = "Port:", value=self.portn )
+        self.password = F.add(npyscreen.TitlePassword, name="Password:", value=self.passwordn)
+        F.add(npyscreen.TitleFixedText, name="Other options:", height=1)
+        self.options = F.add(npyscreen.MultiLineEdit, value=self.optn, max_height=12)
+#        self.forward_only = F.add(npyscreen.Checkbox, name="Forward only?", value=self.fwdn)
+#        self.forward_only= F.add(npyscreen.TitleMultiSelect, value=self.fwdn,
+#                                 name="Mode",values=["Forward only?"],scroll_exit=True)
+        self.connect = False
+        F.edit()
+
+    def __str__(self):
+        return "%s # %s @%s\n%s" % (self.host.value, self.password.value,
+                                     self.forward_only.value, self.options.value)
+
+    def on_switch(self):
+        if self.host.value != self.hostn:
+            ok, pwd = c.get_pass(self.host.value)
+            if ok:
+                self.password.value = pwd
+                self.passwordn = pwd
+            self.hostn = self.host.value
+    
+    def on_ok(self):
+        self.connect = True
+
+def remove_remark(line):
+    pos = line.find("#")
+    if(pos >= 0):
+        line = line[:pos]
+    line = line.strip()
+    return line
+
+def get_key_val(line):
+    pos = line.find("=")
+    if(pos < 0):
+        return "", ""
+    return line[:pos].strip().lower(), line[pos + 1:].strip()
+
+class missh_cfg:
+    fn = ""
+    def __init__(self, fn, new=False, ftp=False):
+        self.fn = fn
+        self.host = None
+        self.opt = []
+        self.ftp = ftp
+#        self.fwd = 0
+        if not new:
+            self.read_cfg()
+            
+    def cmdline(self):
+        p = self.host.find(':')
+        if p > 0:
+            host = self.host[:p]
+            o = [(self.ftp and '-P ' or '-p ') + self.host[p + 1:]]
+        else:
+            host = self.host
+            o = []
+        for i in self.opt:
+            i = i.strip()
+            if not i.startswith("%"):
+                if self.ftp:
+                    if i.startswith("#"):
+                        o.append(i[1:].strip())
+                else:
+                    if not i.startswith("#"):
+                        o.append(i)
+        return (self.ftp and 'sftp ' or "ssh ") + " ".join(o) + " " + host
+        
+    def update(self, host, opt):
+        need_write = False
+        if self.host != host:
+            self.host = host
+            need_write = True
+        if self.opt != opt:
+            self.opt = opt
+            need_write = True
+        if need_write:
+            self.write_cfg()
+
+    def write_cfg(self):
+        f = open(self.fn, "wb")
+        f.write("#!/usr/bin/env missh\n")
+        f.write("# don't edit this file manually. please use 'missh -o'.\n\n")
+        
+        f.write("host = %s\n" % self.host)
+        for i in self.opt:
+            f.write("opt = %s\n" % i)
+        f.close()
+        
+            
+    def read_cfg(self):
+        line_cnt = 0
+        try:
+            f = open(self.fn, "rb")
+            for line in f:
+                line_cnt = line_cnt + 1
+                
+                # strip and remove remarks
+                line = remove_remark(line)
+                if line == '':
+                    continue
+                
+                # fetch the key and value
+                try:
+                    key, val = get_key_val(line)
+                    if(key == "host"):
+                        self.host = val
+                    elif(key == "opt"):
+                        self.opt.append(val)
+                    elif(key == "forward"):
+                        pass # obsolete
+                    else:
+                        raise "bad key"
+                except:
+                    print("error config line #%d : %s" % (line_cnt, line))
+                    continue
+            
+            f.close() 
+        except:
+            print("bad configuration file:", self.fn)
+            return
+        
+def set_master(c, create=True):
+    import getpass
+    if create:
+        note="Create the master password:"
+    else:
+        note="Input the new master password:"
+    while 1:
+        master_pwd = getpass.getpass(note)
+        master_pwd2 = getpass.getpass("Please repeat it:")
+        if master_pwd == master_pwd2:
+            break
+        print("They are not matched!")
+    ok, resp = c.set_master(master_pwd)
+    if not ok:
+        print("Can't set the master key. Error:", resp)
+        sys.exit(1)
+    return master_pwd
+            
+def get_master(c, force=False):
+    if c.need_master() == -2:
+        return set_master(c)
+            
+    elif force or c.need_master() == -1:
+        import getpass
+        while 1:
+            master_pwd = getpass.getpass("Input the master password:")
+            ok, resp = c.check_master(master_pwd)
+            if not ok:
+                print("Please try again. Error:", resp)
+            else:
+                return master_pwd
+    return None
+
+def usage(to=None):
+    print("missh 0.3.0 by LenX (lenx.wei@gmail.com)")
+    print() 
+    if to!=None:
+        print("The timeout of caching the master password is",to,"minutes.")
+    print("""Usage:
+missh [opt] [file_path]
+   -o             open a session file
+   -n             create a new session file
+   -m             change the master password
+   -t timeout     change the timeout of caching the master password, in minutes
+   -k             kill all background missh processes
+   -r             reconnect automatically after disconnection
+   -f             use sftp to connect the host
+   -h             show help information
+   -v             verbose mode
+""")
+    sys.exit(2)
+
+def main():
+    global c
+    # parse arguments
+    fn = "" 
+    conf = ""
+    kill = False
+    
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], "hvnomt:krsf")
+    except getopt.GetoptError as err:
+        print(str(err))  # will print something like "option -a not recognized"
+        usage()
+    
+    edit = False
+    kill = False
+    create = False
+    change_master = False
+    timeout= None
+    recon = False
+    ftp = False
+    
+    for o, a in opts:
+        if o == "-v":
+            mipass.verbose = True
+        elif o == "-h":
+            usage()
+            sys.exit()
+        elif o == "-o":
+            edit = True
+        elif o == '-n':
+            edit = True
+            create = True
+        elif o == '-k':
+            kill = True
+        elif o == '-m':
+            change_master = True
+        elif o == '-t':
+            timeout=a
+        elif o == '-r':
+            recon = True
+        elif o == '-f':
+            ftp = True
+        else:
+            print("Error: bad options - ( %s : %s )" % (o, a))
+            usage()
+
+    c = mipass.client(mipass.unixsock)
+
+    if change_master:
+        c.connect()
+        if c.need_master()==-2:
+            master_pwd = get_master(c, True)
+        else:
+            master_pwd = get_master(c, True)
+            new_pwd = set_master(c, False)
+            if new_pwd!=master_pwd:
+                c.set_master(new_pwd)
+        return
+    
+    if kill:
+        ok, resp = c.kill()
+        if ok:
+            print("The service is stopped.")
+        else:
+            print(resp)
+        sys.exit(0)
+
+    ok, to = c.get_timeout()
+    if timeout!=None:
+        try:
+            t1=int(timeout)
+        except:
+            t1=-1
+        if t1<=0:
+            print("Bad timeout:",timeout)
+            return
+        
+        if not ok or to!=timeout:
+            c.set_timeout(timeout)
+            print("The timeout is set to %s." % timeout)
+        else:
+            print("The timeout is still %s." % timeout)
+        return
+    
+    if(len(args) == 1):
+        fn = args[0]
+    else:
+        if not ok:
+            to=None
+        usage(to)
+        sys.exit(2)
+
+    if not os.path.exists(fn) and not create:
+        print("Session file is not found:", fn)
+        sys.exit(1)
+    
+    if create and os.path.exists(fn):
+        s = input("Session file exists. Are you going to rewrite it? [y/n]")
+        if s.lower() == 'y' or s.lower() == 'yes':
+            pass
+        else:
+            sys.exit(1)
+
+    c.connect()
+    get_master(c)
+    
+    # parse msh file
+    connect = True
+    cfg = missh_cfg(fn, create, ftp=ftp)
+        
+    # [a:login:main:get_password]
+    if create:
+        pwd = ""
+        cfg.opt = default_opt.split('\n')
+    else:
+        ok, pwd = c.get_pass(cfg.host)
+        
+        if not ok:
+            pwd = ""
+    
+    if mipass.verbose:
+        print("Password:", pwd)
+    
+    # show dialog if needed
+    # todo: verbose mode
+    if edit:
+        App = MisshApp(fn, cfg.host, pwd, "\n".join(cfg.opt))
+        App.run()
+        connect = App.connect
+        # update config
+        if connect:
+            cfg.update(App.host.value, App.options.value.split('\n'))
+            # update pwd
+            if pwd != App.password.value:
+                pwd = App.password.value
+            if App.passwordn != pwd:
+                c.set_pass(cfg.host, pwd)
+        
+    # connect to ssh
+    if connect:
+        while 1:
+            fail = False
+        
+            #workaround a bug of term of mac osx
+            #if platform.system().lower()=="darwin":
+            #    os.system("clear")
+            
+            print(cfg.cmdline())
+            c = mipexpect.spawn(cfg.cmdline())
+            try:
+                i = c.expect(["yes/no", "assword:"], timeout=30)
+                if i == 0:
+                    y = input("%syes/no)?" % c.before)
+                    if y.strip().lower() == "yes":
+                        c.sendline("yes\n")
+                        i = c.expect("assword:", timeout=30)
+                    else:
+                        c.sendline("no\n")
+                        print("Host key verification failed.")
+                        fail = True
+                    pass
+                if not fail:
+                    c.sendline(pwd)
+            except:
+                fail=True
+                print(c.before)
+            if not fail:
+                c.interact()
+                
+            if recon:
+                print("[%s] Disconnected. Try to reconnect after 3 sec. You can break it using CTRL-C." %\
+                     time.ctime())
+                time.sleep(3)
+                continue
+
+            break
+            #workaround a bug of term of mac osx
+            #if platform.system().lower()=="darwin":
+            #    os.system("tput reset")
+            
+
+if __name__ == "__main__":
+    main()
+    
